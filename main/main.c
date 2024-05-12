@@ -6,6 +6,23 @@
 #include "freertos/task.h"
 #include "esp_err.h"
 
+#define SAMPLES_BUF_LEN 1024
+#define WINDOW_AVG_LEN 5
+
+int window_avg(int *array_buf, const unsigned int buf_len, unsigned int tail_pos, const unsigned int window_len) {
+
+	unsigned int start_point = (tail_pos - window_len) % buf_len;
+	int avg = 0;
+	int samples = 0;
+	for(int i = start_point; i != tail_pos; i = (i + 1) % buf_len) {
+		avg += *(array_buf + i) / window_len;
+		samples++;
+	}
+	printf("Average on %d samples\n", samples);
+	return avg;
+
+}
+
 void app_main(void)
 {
 
@@ -26,12 +43,23 @@ void app_main(void)
 
 	ESP_ERROR_CHECK(adc_oneshot_config_channel(adc_handle, ADC_CHANNEL_6, &adc_chan_cfg));
 	
-	// Taking samples
-	int read_val;
+	// Priming samples buffer
+	int *samples_buf = malloc(sizeof(int) * SAMPLES_BUF_LEN);
+
+	for(int i = 0; i < SAMPLES_BUF_LEN; i++) {
+		ESP_ERROR_CHECK(adc_oneshot_read(adc_handle, ADC_CHANNEL_6, samples_buf + i));
+	}
+
+	// TODO: This is where i should adjust the sampling frequency
+
+	// Getting samples and computing moving average
+	unsigned int offset = 0;
 	while(1) {
-		ESP_ERROR_CHECK(adc_oneshot_read(adc_handle, ADC_CHANNEL_6, &read_val));
-		printf("%d\n", read_val);
-		vTaskDelay(100 / portTICK_PERIOD_MS);		// This determines the sampling rate of the ADC
+		ESP_ERROR_CHECK(adc_oneshot_read(adc_handle, ADC_CHANNEL_6, samples_buf + offset));
+		printf("ADC: Read %d\n", *(samples_buf + offset));
+		printf("ADC: Running avg: %d\n", window_avg(samples_buf, SAMPLES_BUF_LEN, offset, WINDOW_AVG_LEN));
+		offset++;
+		vTaskDelay(500 / portTICK_PERIOD_MS);
 	}
 
 }
