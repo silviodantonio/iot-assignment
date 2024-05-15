@@ -6,8 +6,10 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_err.h"
+#include "nvs_flash.h"
 
 #include "wifi.c"
+#include "mqtt.c"
 
 #define SAMPLES_BUF_LEN 1024
 #define WINDOW_AVG_LEN 5
@@ -26,8 +28,8 @@ int window_avg(int *array_buf, const unsigned int buf_len, unsigned int tail_pos
 
 }
 
-void comms_common_config() {
-	
+void app_main(void)
+{
 	//Initialize NVS
 	//Needed for storing wifi config values into flash memory (default and expected behaviour)
 	esp_err_t ret = nvs_flash_init();
@@ -37,19 +39,17 @@ void comms_common_config() {
 	}
 	ESP_ERROR_CHECK(ret);
 
-	// Creating netif component
+	// Creating netif component that automatically manages some wifi events
 	ESP_ERROR_CHECK(esp_netif_init());
 	
-	// Event loop needed by Wifi and MQTT modules
+	// Event loop to which Wifi and MQTT post events
 	ESP_ERROR_CHECK(esp_event_loop_create_default());
-}
 
-void app_main(void)
-{
-
-	comms_common_config();
-	wifi_station_run();
+	wifi_start();
+	vTaskDelay(10000 / portTICK_PERIOD_MS);
+	mqtt_start_example();
 	
+	/*
 	// Configuring and initializing ADC
 	adc_oneshot_unit_init_cfg_t adc_unit_cfg = {
 		.unit_id = ADC_UNIT_1,
@@ -85,6 +85,7 @@ void app_main(void)
 		offset++;
 		vTaskDelay(500 / portTICK_PERIOD_MS);
 	}
+	*/
 
 
 }
