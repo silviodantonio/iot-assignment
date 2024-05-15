@@ -9,7 +9,7 @@
 #include "freertos/task.h"
 
 // Probably i will move this in a separate .h file
-#define SAMPLES_BUF_LEN 1024
+#define SAMPLES_BUF_LEN 2048
 #define WINDOW_AVG_LEN 5
 
 static adc_oneshot_unit_handle_t adc_handle;
