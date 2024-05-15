@@ -1,10 +1,10 @@
+#include "wifi.h"
+#include "project_constants.h"
+
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_wifi_types.h"
-
-#define WIFI_SSID      "iPhone di Silvio"
-#define WIFI_PASS      ""
 
 static const char *WIFI_TAG = "wifi task";
 
@@ -32,15 +32,14 @@ void wifi_start(void)
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
     // Register event handler to the default loop
-    esp_event_handler_instance_t instance_got_ip;
-    esp_event_handler_instance_t instance_ap_connected;
+    esp_event_handler_instance_t wifi_handler_instance;
 
     ESP_ERROR_CHECK(esp_event_handler_instance_register(
       IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL,
-      &instance_got_ip));
+      &wifi_handler_instance));
     ESP_ERROR_CHECK(esp_event_handler_instance_register(
         WIFI_EVENT, WIFI_EVENT_STA_CONNECTED, &wifi_event_handler, NULL,
-        &instance_ap_connected));
+        &wifi_handler_instance));
 
     // Configuring the wifi driver
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
@@ -68,7 +67,7 @@ void wifi_start(void)
     // that is executed by the netif task.
     // Also in this case, we won't check for the "CONNECTED".
     ESP_LOGI(WIFI_TAG, "Trying to connect to AP");
-    esp_wifi_connect();
+    ESP_ERROR_CHECK(esp_wifi_connect());
 
     // After the DHCP process succesfully terminates, netif task triggers
     // an event "GOT_IP". After this i assume i can safely start to use MQTT.

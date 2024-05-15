@@ -1,6 +1,7 @@
 #include "sampling.h"
 
 #include <stdio.h>
+#include "project_constants.h"
 #include "esp_adc/adc_oneshot.h"
 #include "soc/clk_tree_defs.h" // For selecting clock sources
 #include "esp_err.h"
@@ -9,8 +10,6 @@
 #include "freertos/task.h"
 
 // Probably i will move this in a separate .h file
-#define SAMPLES_BUF_LEN 2048
-#define WINDOW_AVG_LEN 5
 
 static adc_oneshot_unit_handle_t adc_handle;
 
@@ -32,8 +31,8 @@ void adc_configure()
 {
 	// Configuring and initializing ADC
 	adc_oneshot_unit_init_cfg_t adc_unit_cfg = {
-		.unit_id = ADC_UNIT_1,
-		.clk_src = ADC_DIGI_CLK_SRC_DEFAULT,	// Uses ABP_CLK, should default at 40MHz
+		.unit_id = ADC_UNIT,
+		.clk_src = ADC_CLK_SRC,	// Uses ABP_CLK, should default at 40MHz
 		.ulp_mode = ADC_ULP_MODE_DISABLE,
 	};
 
@@ -45,25 +44,27 @@ void adc_configure()
 		.atten = ADC_ATTEN_DB_0,
 	};
 
-	ESP_ERROR_CHECK(adc_oneshot_config_channel(adc_handle, ADC_CHANNEL_6, &adc_chan_cfg));
+	ESP_ERROR_CHECK(adc_oneshot_config_channel(adc_handle, ADC_CHANNEL, &adc_chan_cfg));
 }
 
 void adc_priming_samples_buf(int *samples_buf)
 {
 
-	for(int i = 0; i < SAMPLES_BUF_LEN; i++) {
-		ESP_ERROR_CHECK(adc_oneshot_read(adc_handle, ADC_CHANNEL_6, samples_buf + i));
+	for(int i = 0; i < ADC_SAMPLE_BUFFER_SIZE; i++) {
+		ESP_ERROR_CHECK(adc_oneshot_read(adc_handle, ADC_CHANNEL, samples_buf + i));
 	}
 
 }
 
-void adc_sampling_start(int *samples_buf)
+void adc_sampling_start(int *samples_buf, bool log)
 {
 	// Continuously reading samples
 	static unsigned int offset = 0;
 	while(1) {
-		ESP_ERROR_CHECK(adc_oneshot_read(adc_handle, ADC_CHANNEL_6, samples_buf + offset));
-		printf("ADC: Read %d\n", *(samples_buf + offset));
+		ESP_ERROR_CHECK(adc_oneshot_read(adc_handle, ADC_CHANNEL, samples_buf + offset));
+		if(!log) {
+			printf("ADC: Read %d\n", *(samples_buf + offset));
+		}
 		offset++;
 		vTaskDelay(500 / portTICK_PERIOD_MS);
 	}
