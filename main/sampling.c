@@ -43,7 +43,7 @@ void adc_configure()
 		.ulp_mode = ADC_ULP_MODE_DISABLE,
 	};
 
-	// adc unit handle is passed as an argument, will it work?
+	// adc handler is declared as static (check top of file)
 	ESP_ERROR_CHECK(adc_oneshot_new_unit(&adc_unit_cfg, &adc_handle));
 
 	adc_oneshot_chan_cfg_t adc_chan_cfg = {

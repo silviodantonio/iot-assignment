@@ -1,9 +1,12 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include "freertos/FreeRTOS.h"
+#include "freertos/projdefs.h" // I hope that this works
 #include "freertos/task.h"
+#include "freertos/message_buffer.h"
 #include "esp_err.h"
 #include "esp_task_wdt.h"
+#include "esp_adc/adc_oneshot.h"
 
 #include "esp_pm.h"
 #include "project_constants.h"
@@ -14,6 +17,9 @@
 // #include "wifi.h"
 // #include "mqtt.h"
 
+//
+// Creating message buffer for samples
+static MessageBufferHandle_t samples_buf_handle;
 
 void computeAvgTask (void *arg)
 {
@@ -35,70 +41,74 @@ void computeAvgTask (void *arg)
 
 void samplingTask (void *arg)
 {
-	int *samples_buf = arg;
+	// Configuring and initializing ADC
+	adc_oneshot_unit_init_cfg_t adc_unit_cfg = {
+		.unit_id = ADC_UNIT,
+		.clk_src = ADC_CLK_SRC,	// Uses ABP_CLK, should default at 40MHz
+		.ulp_mode = ADC_ULP_MODE_DISABLE,
+	};
 
-	// Measuring sampling rate (this could be moved in a test task
-	size_t start = xTaskGetTickCount();
-	adc_priming_samples_buf(samples_buf);
-	size_t end = xTaskGetTickCount();
+	// adc unit handle is passed as an argument, will it work?
+	adc_oneshot_unit_handle_t adc_handle;
+	ESP_ERROR_CHECK(adc_oneshot_new_unit(&adc_unit_cfg, &adc_handle));
 
-	size_t exec_time_ticks = end - start;
-	unsigned exec_time_ms = exec_time_ticks * portTICK_PERIOD_MS;
+	adc_oneshot_chan_cfg_t adc_chan_cfg = {
+		.bitwidth = ADC_BITWIDTH_DEFAULT,	// Defaults to max bitwidth (12 bits for ESP32-S3)
+		.atten = ADC_ATTEN_DB_6,
+	};
 
-	printf("Max sampling frequency (?) declared: %u kHz\n", SOC_ADC_SAMPLE_FREQ_THRES_HIGH / 1000);
-	printf("Filling a %d samples buffer took: %u ms\n", ADC_SAMPLES_BUFFER_SIZE, exec_time_ms);
+	ESP_ERROR_CHECK(adc_oneshot_config_channel(adc_handle, ADC_CHANNEL, &adc_chan_cfg));
 
-	float Ts = (float)exec_time_ms / ADC_SAMPLES_BUFFER_SIZE;
+	// Sampling loop
+	while(1) {
+		int sample_val;
+		int send_ret;
+		ESP_ERROR_CHECK(adc_oneshot_read(adc_handle, ADC_CHANNEL, &sample_val));
+		// Note: ticks to wait could be set to a value less than the used sampling rate
+		// (that must be computed beforehand)
+		printf("ADC Read: %d\n", sample_val);
+		send_ret = xMessageBufferSend(samples_buf_handle, &sample_val, sizeof(int), 0);
+		printf("Written %d bytes to message buffer\n", send_ret);
+		vTaskDelay(pdMS_TO_TICKS(10));
+	}
 
-	float sampling_freq = 1 / Ts; // kHz
-	sampling_freq *= 1000; //Hz
 	
-	printf("Approximate actual sampling frequency: %f Hz\n", sampling_freq);
 
-	// i should add inside this esp_task_wdt_reset();
-	// however is probably better if i unpack this loop inside
-	// the task
-	adc_sampling_loop(samples_buf, (float)1000, true);
 
 }
+
 
 void app_main(void)
 {
 	// here the tasks for comms should be started (wifi and MQTT)
-
-	// Creating buffer for samples
-	int *samples_buf = malloc(sizeof(unsigned int) * ADC_SAMPLES_BUFFER_SIZE);
-
-	//maybe is a good idea to prime the samples buffer
-	adc_configure();
-	adc_priming_samples_buf(samples_buf);
 	
 	// Create the task that computes average before starting to sample
 	// continuously
-	TaskHandle_t computeAvgTask_handle;
-	xTaskCreate(
-		computeAvgTask, // name of func that implements the task
-		"computeAvgTask", // descriptive name
-		4096, // stack size in words (esp32s3 is a 32 bit architecture)
-		(void*)samples_buf, // values passed to the task function
-		0, // task priority
-		&computeAvgTask_handle // handle for managing the task
-	);
-	esp_task_wdt_add(computeAvgTask_handle);
+	// TaskHandle_t computeAvgTask_handle;
+	// xTaskCreate(
+	// 	computeAvgTask, // name of func that implements the task
+	// 	"computeAvgTask", // descriptive name
+	// 	4096, // stack size in words (esp32s3 is a 32 bit architecture)
+	// 	(void*)&samples_buf // values passed to the task function
+	// 	0, // task priority
+	// 	&computeAvgTask_handle // handle for managing the task
+	// );
+	// esp_task_wdt_add(computeAvgTask_handle);
 
 	
 	// Commented for now, it produces a stack overflow somewhere
+	samples_buf_handle = xMessageBufferCreate((sizeof(size_t) + sizeof(int)) * ADC_SAMPLES_BUFFER_SIZE);
 	
 	TaskHandle_t samplingTask_handle;
 	xTaskCreate(
 		samplingTask, // name of func that implements the task
 		"samplingTask", // descriptive name
 		4096, // stack size in words (esp32s3 is a 32 bit architecture)
-		(void*)samples_buf, // values passed to the task function
-		1, // task priority
+		NULL, // values passed to the task function
+		0, // task priority
 		&samplingTask_handle // handle for managing the task
 	);
-	esp_task_wdt_add(samplingTask_handle);
+	// esp_task_wdt_add(samplingTask_handle);
 
 	
 }
