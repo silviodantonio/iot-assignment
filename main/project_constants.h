@@ -6,7 +6,7 @@
 
 #define ADC_SAMPLES_BUFFER_SIZE 1024
 // Probably would be better if this value is calculated at runtime
-#define WINDOWED_AVG_SAMPLES_NUM 5
+#define WINDOWED_AVG_SAMPLES_NUM 256
 #define ADC_UNIT ADC_UNIT_1
 #define ADC_CHANNEL ADC_CHANNEL_6
 #define ADC_CLK_SRC ADC_DIGI_CLK_SRC_PLL_F240M

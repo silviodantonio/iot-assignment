@@ -4,6 +4,7 @@
 
 #include <stdio.h>
 #include "esp_log.h"
+#include "esp_task_wdt.h"
 #include "hal/adc_types.h"
 #include "project_constants.h"
 #include "esp_adc/adc_oneshot.h"
@@ -27,12 +28,9 @@ int window_avg(int *array_buf, const unsigned int buf_len, unsigned int tail_pos
 
 	unsigned int start_point = (tail_pos - window_len) % buf_len;
 	int avg = 0;
-	int samples = 0;
 	for(int i = start_point; i != tail_pos; i = (i + 1) % buf_len) {
 		avg += *(array_buf + i) / window_len;
-		samples++;
 	}
-	printf("Average on %d samples\n", samples);
 	return avg;
 }
 
@@ -110,6 +108,8 @@ void adc_sampling_loop(int *samples_buf, float sampling_freq, bool log)
 		offset++;
 		offset %= ADC_SAMPLES_BUFFER_SIZE;
 		vTaskDelay(t_ms / portTICK_PERIOD_MS);
+		// A temporary and ugly fix
+		esp_task_wdt_reset();
 	}
 }
 
