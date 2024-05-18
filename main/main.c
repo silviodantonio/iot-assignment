@@ -16,7 +16,7 @@
 
 void app_main(void)
 {
-	communications_common_config();
+	// communications_common_config();
 
 	/*
 	wifi_start();
@@ -27,21 +27,38 @@ void app_main(void)
 	adc_configure();
 
 	// Allocating samples buffer
-	int *samples_buf = malloc(sizeof(int) * ADC_SAMPLE_BUFFER_SIZE);
+	int *samples_buf = malloc(sizeof(unsigned int) * ADC_SAMPLES_BUFFER_SIZE);
+
+	// Priming buffer
+	// adc_priming_samples_buf(samples_buf);
 
 	size_t start = xTaskGetTickCount();
-	adc_priming_samples_buf(samples_buf);
+	adc_sampling_once(samples_buf, (float) 100, false);
 	size_t end = xTaskGetTickCount();
 
 	size_t ticks = end - start;
 	unsigned ms = ticks * portTICK_PERIOD_MS;
 
 	printf("Max sampling frequency (?) declared: %u kHz\n", SOC_ADC_SAMPLE_FREQ_THRES_HIGH / 1000);
-	printf("Filling a 2048 samples buffer took: %u ms\n", ms);
-	printf("Approximate actual sampling frequency: %u kHz\n", ADC_SAMPLE_BUFFER_SIZE / ms);
+	printf("Filling a %d samples buffer took: %u ms\n", ADC_SAMPLES_BUFFER_SIZE, ms);
+
+	/*
+	float Ts = (float)ms / ADC_SAMPLES_BUFFER_SIZE;
+
+	float sampling_freq = 1 / Ts; // kHz
+	sampling_freq *= 1000; //Hz
+	
+	printf("Approximate actual sampling frequency: %f Hz\n", sampling_freq);
+
+	int min_val;
+	int max_val;
+	get_min_max(samples_buf, &min_val, &max_val);
+	printf("Min V: %u, Max V: %u, Delta: %u\n", min_val, max_val, max_val - min_val); 
 
 	// TODO: This is where i should adjust the sampling frequency
+
+	get_max_freq(samples_buf, sampling_freq);
 	
-	adc_sampling_start(samples_buf, false);
+	*/
 	
 }
