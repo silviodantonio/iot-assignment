@@ -2,10 +2,12 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
+#include "esp_netif_types.h"
 #include "esp_system.h"
 #include "esp_event.h"
 
 #include "esp_log.h"
+#include "esp_wifi_types.h"
 #include "mqtt_client.h"
 
 char *MQTT_TAG = "MQTT";
@@ -34,6 +36,8 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     esp_mqtt_event_handle_t event = event_data;
     esp_mqtt_client_handle_t client = event->client;
     int msg_id;
+
+
     switch ((esp_mqtt_event_id_t)event_id) {
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI(MQTT_TAG, "MQTT_EVENT_CONNECTED");
@@ -85,17 +89,30 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     }
 }
 
-static void mqtt_app_start(void)
+static void mqtt_init_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data)
+{
+    if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+
+        esp_mqtt_client_config_t mqtt_cfg = {
+            .broker.address.uri = BROKER_ADDRESS,
+        };
+
+        esp_mqtt_client_handle_t client = esp_mqtt_client_init(&mqtt_cfg);
+        esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
+
+        esp_mqtt_client_start(client);
+    }
+
+}
+
+void mqtt_app_start(void)
 {
     ESP_LOGI(MQTT_TAG, "Starting module");
 
-    esp_mqtt_client_config_t mqtt_cfg = {
-        .broker.address.uri = BROKER_ADDRESS,
-
-    };
-
-    esp_mqtt_client_handle_t client = esp_mqtt_client_init(&mqtt_cfg);
-    esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
-
-    esp_mqtt_client_start(client);
+    esp_event_handler_instance_t mqtt_init_handler_instance;
+    esp_event_handler_instance_register(IP_EVENT,
+                               IP_EVENT_STA_GOT_IP, 
+                               &mqtt_init_handler,
+                               NULL,
+                               &mqtt_init_handler_instance);
 }

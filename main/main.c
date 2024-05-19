@@ -92,6 +92,7 @@ void app_main(void)
 	// here i should initialize the sampling freq value
 	
 	wifi_init();
+	mqtt_app_start();
 	
 	samples_buf_handle = xMessageBufferCreate((sizeof(size_t) + sizeof(int)) * ADC_SAMPLES_BUFFER_SIZE);
 	sampling_freq = 10; //Hz
