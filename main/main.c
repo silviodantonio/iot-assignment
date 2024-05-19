@@ -5,17 +5,14 @@
 #include "freertos/task.h"
 #include "freertos/message_buffer.h"
 #include "esp_err.h"
-#include "esp_task_wdt.h"
+// #include "esp_task_wdt.h"
 #include "esp_adc/adc_oneshot.h"
 
-#include "esp_pm.h"
 #include "project_constants.h"
-#include "common_configs.h"
-#include "soc/soc_caps.h"
 
 #include "sampling.h"
-// #include "wifi.h"
-// #include "mqtt.h"
+#include "wifi.h"
+#include "mqtt.h"
 
 // Creating message buffer for samples
 static MessageBufferHandle_t samples_buf_handle;
@@ -86,15 +83,15 @@ void samplingTask (void *arg)
 		vTaskDelay(pdMS_TO_TICKS(delay));
 	}
 	
-
 }
 
 
 void app_main(void)
 {
-	// here the tasks for comms should be started (wifi and MQTT)
-	
+
 	// here i should initialize the sampling freq value
+	
+	wifi_init();
 	
 	samples_buf_handle = xMessageBufferCreate((sizeof(size_t) + sizeof(int)) * ADC_SAMPLES_BUFFER_SIZE);
 	sampling_freq = 10; //Hz
@@ -103,23 +100,23 @@ void app_main(void)
 	
 	TaskHandle_t samplingTask_handle;
 	xTaskCreate(
-		samplingTask, // name of func that implements the task
-		"samplingTask", // descriptive name
-		4096, // stack size in words (esp32s3 is a 32 bit architecture)
-		NULL, // values passed to the task function
-		0, // task priority
-		&samplingTask_handle // handle for managing the task
+		samplingTask,
+		"samplingTask",
+		4096,
+		NULL,
+		0,
+		&samplingTask_handle
 	);
 	// esp_task_wdt_add(samplingTask_handle);
 
 	TaskHandle_t runningAvgTask_handle;
 	xTaskCreate(
-		runningAvgTask, // name of func that implements the task
-		"runningAvgTask", // descriptive name
-		4096, // stack size in words (esp32s3 is a 32 bit architecture)
-		NULL, // values passed to the task function
-		0, // task priority
-		&runningAvgTask_handle // handle for managing the task
+		runningAvgTask,
+		"runningAvgTask",
+		4096,
+		NULL,
+		0,
+		&runningAvgTask_handle
 	);
 
 	

@@ -12,6 +12,7 @@
 #define ADC_CLK_SRC ADC_DIGI_CLK_SRC_PLL_F240M
 
 #define WIFI_SSID "iPhone di Silvio"
-#define WIFI_PASS ""
+#define WIFI_PASS "iotproject"
+#define WIFI_MAX_ATTEMPTS 5
 
 #endif
