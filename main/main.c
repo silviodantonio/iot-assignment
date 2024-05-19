@@ -1,24 +1,29 @@
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h"
 #include "freertos/projdefs.h" // I hope that this works
 #include "freertos/task.h"
 #include "freertos/message_buffer.h"
 #include "esp_err.h"
+#include "esp_log.h"
 // #include "esp_task_wdt.h"
 #include "esp_adc/adc_oneshot.h"
 
+#include "mqtt_client.h"
 #include "project_constants.h"
 
 #include "sampling.h"
 #include "wifi.h"
 #include "mqtt.h"
 
-// Creating message buffer for samples
+static const char* MAIN_TAG = "Main task";
 static MessageBufferHandle_t samples_buf_handle;
 static unsigned int running_avg_period_s;
 static float sampling_freq = 0;
 static unsigned int wait_time_ticks;
+static esp_mqtt_client_handle_t mqtt_client_handle;
 
 void runningAvgTask (void *arg)
 {
@@ -43,6 +48,11 @@ void runningAvgTask (void *arg)
 		}
 
 		printf("Average value over %u s: %d\n", running_avg_period_s, avg);
+		
+		char int_string[11];
+		sprintf(int_string, "%d", avg);
+
+		esp_mqtt_client_publish(mqtt_client_handle, "/topic/qos0", int_string, 0, 0, 0);
 		// Then the data should be sent to MQTT
 	}
 
@@ -67,6 +77,20 @@ void samplingTask (void *arg)
 
 	ESP_ERROR_CHECK(adc_oneshot_config_channel(adc_handle, ADC_CHANNEL, &adc_chan_cfg));
 
+	// Measure time taken for sampling a fixed amount of samples (max frequency)
+	int dummy_sample;
+	unsigned int num_test_samples = 100000;
+	unsigned int start_time = xTaskGetTickCount();
+	for(size_t i = 0; i < num_test_samples; i++){
+		adc_oneshot_read(adc_handle, ADC_CHANNEL, &dummy_sample);
+	}
+	unsigned int sampling_duration_ticks = xTaskGetTickCount() - start_time;
+	float sampling_duration_sec = pdTICKS_TO_MS(sampling_duration_ticks) / 1000;
+	float max_sampling_freq_hz = num_test_samples / sampling_duration_sec;
+	
+	ESP_LOGI(MAIN_TAG, "Took %f seconds to sample %d", sampling_duration_sec, num_test_samples);
+	ESP_LOGI(MAIN_TAG, "Estimated max sampling frequency is: %f Hz", max_sampling_freq_hz);
+	
 	// Compute delay for obtaining the desired sampling frequency
 	unsigned delay = 1000 / sampling_freq;
 
@@ -89,10 +113,8 @@ void samplingTask (void *arg)
 void app_main(void)
 {
 
-	// here i should initialize the sampling freq value
-	
 	wifi_init();
-	mqtt_app_start();
+	mqtt_client_handle = mqtt_app_start();
 	
 	samples_buf_handle = xMessageBufferCreate((sizeof(size_t) + sizeof(int)) * ADC_SAMPLES_BUFFER_SIZE);
 	sampling_freq = 10; //Hz
@@ -119,6 +141,5 @@ void app_main(void)
 		0,
 		&runningAvgTask_handle
 	);
-
 	
 }

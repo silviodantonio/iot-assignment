@@ -8,11 +8,18 @@
 
 #include "esp_log.h"
 #include "esp_wifi_types.h"
+#include "freertos/idf_additions.h"
+#include "freertos/event_groups.h"
+#include "freertos/projdefs.h"
 #include "mqtt_client.h"
+#include "portmacro.h"
+
+#define WIFI_GOT_IP BIT0
 
 char *MQTT_TAG = "MQTT";
 
 static const char *BROKER_ADDRESS = "mqtt://mqtt.eclipseprojects.io";
+static EventGroupHandle_t wifi_event_group;
 
 static void log_error_if_nonzero(const char *message, int error_code)
 {
@@ -92,22 +99,26 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 static void mqtt_init_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data)
 {
     if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
-
-        esp_mqtt_client_config_t mqtt_cfg = {
-            .broker.address.uri = BROKER_ADDRESS,
-        };
-
-        esp_mqtt_client_handle_t client = esp_mqtt_client_init(&mqtt_cfg);
-        esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
-
-        esp_mqtt_client_start(client);
+        xEventGroupSetBits(wifi_event_group, WIFI_GOT_IP);
     }
 
 }
 
-void mqtt_app_start(void)
+esp_mqtt_client_handle_t mqtt_app_start(void)
 {
     ESP_LOGI(MQTT_TAG, "Starting module");
+
+    wifi_event_group = xEventGroupCreate();
+
+    // Init and configure (move here)
+
+    esp_mqtt_client_config_t mqtt_cfg = {
+        .broker.address.uri = BROKER_ADDRESS,
+    };
+
+    esp_mqtt_client_handle_t client = esp_mqtt_client_init(&mqtt_cfg);
+    esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
+
 
     esp_event_handler_instance_t mqtt_init_handler_instance;
     esp_event_handler_instance_register(IP_EVENT,
@@ -115,4 +126,23 @@ void mqtt_app_start(void)
                                &mqtt_init_handler,
                                NULL,
                                &mqtt_init_handler_instance);
+
+    //wait for event group
+    EventBits_t return_bit = xEventGroupWaitBits(wifi_event_group,
+                        WIFI_GOT_IP,
+                        pdFALSE,
+                        pdFALSE,
+                        portMAX_DELAY);
+
+    // if everyting is ok then start mqtt
+    if ((return_bit & BIT0) == true) {
+        esp_mqtt_client_start(client);
+        return client;
+    }
+    else {
+        ESP_LOGW(MQTT_TAG, "Couldn't start, didn't get an IP address");
+        return NULL;
+    }
+
+
 }
