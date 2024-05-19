@@ -17,24 +17,36 @@
 // #include "wifi.h"
 // #include "mqtt.h"
 
-//
 // Creating message buffer for samples
 static MessageBufferHandle_t samples_buf_handle;
+static unsigned int running_avg_period_s;
+static float sampling_freq = 0;
+static unsigned int wait_time_ticks;
 
-void computeAvgTask (void *arg)
+void runningAvgTask (void *arg)
 {
-	int *samples_buf = arg;
-	int tail_pos = 0;
+
+	unsigned int window_size = sampling_freq * running_avg_period_s;
 
 	while(1) {
-		int avg = window_avg(samples_buf, ADC_SAMPLES_BUFFER_SIZE, tail_pos, WINDOWED_AVG_SAMPLES_NUM);
+
+		int avg = 0;
+		int val_read;
+		unsigned int samples_count = 0;
+
+		// Compute average only after enough samples have
+		// been collected
+		vTaskDelay(pdMS_TO_TICKS(running_avg_period_s * 1000));
 		
-		// This printf will need to be a value posted to the imput queue for
-		// the MQTT module
-		// printf("AVERAGE: %d\n", avg);
-		tail_pos++;
-		tail_pos %= ADC_SAMPLES_BUFFER_SIZE;
-		esp_task_wdt_reset();
+		while(samples_count < window_size) {
+			xMessageBufferReceive(samples_buf_handle, &val_read, sizeof(int), wait_time_ticks);
+			avg += (val_read) / window_size;
+			samples_count++;
+			// esp_task_wdt_reset();
+		}
+
+		printf("Average value over %u s: %d\n", running_avg_period_s, avg);
+		// Then the data should be sent to MQTT
 	}
 
 }
@@ -44,12 +56,11 @@ void samplingTask (void *arg)
 	// Configuring and initializing ADC
 	adc_oneshot_unit_init_cfg_t adc_unit_cfg = {
 		.unit_id = ADC_UNIT,
-		.clk_src = ADC_CLK_SRC,	// Uses ABP_CLK, should default at 40MHz
+		.clk_src = ADC_CLK_SRC,
 		.ulp_mode = ADC_ULP_MODE_DISABLE,
 	};
 
-	// adc unit handle is passed as an argument, will it work?
-	adc_oneshot_unit_handle_t adc_handle;
+	adc_oneshot_unit_handle_t adc_handle;	// This could be moved into global scope
 	ESP_ERROR_CHECK(adc_oneshot_new_unit(&adc_unit_cfg, &adc_handle));
 
 	adc_oneshot_chan_cfg_t adc_chan_cfg = {
@@ -59,6 +70,9 @@ void samplingTask (void *arg)
 
 	ESP_ERROR_CHECK(adc_oneshot_config_channel(adc_handle, ADC_CHANNEL, &adc_chan_cfg));
 
+	// Compute delay for obtaining the desired sampling frequency
+	unsigned delay = 1000 / sampling_freq;
+
 	// Sampling loop
 	while(1) {
 		int sample_val;
@@ -66,14 +80,12 @@ void samplingTask (void *arg)
 		ESP_ERROR_CHECK(adc_oneshot_read(adc_handle, ADC_CHANNEL, &sample_val));
 		// Note: ticks to wait could be set to a value less than the used sampling rate
 		// (that must be computed beforehand)
-		printf("ADC Read: %d\n", sample_val);
-		send_ret = xMessageBufferSend(samples_buf_handle, &sample_val, sizeof(int), 0);
-		printf("Written %d bytes to message buffer\n", send_ret);
-		vTaskDelay(pdMS_TO_TICKS(10));
+		// printf("ADC Read: %d\n", sample_val);
+		send_ret = xMessageBufferSend(samples_buf_handle, &sample_val, sizeof(int), wait_time_ticks);
+		// printf("Written %d bytes to message buffer\n", send_ret);
+		vTaskDelay(pdMS_TO_TICKS(delay));
 	}
-
 	
-
 
 }
 
@@ -82,22 +94,12 @@ void app_main(void)
 {
 	// here the tasks for comms should be started (wifi and MQTT)
 	
-	// Create the task that computes average before starting to sample
-	// continuously
-	// TaskHandle_t computeAvgTask_handle;
-	// xTaskCreate(
-	// 	computeAvgTask, // name of func that implements the task
-	// 	"computeAvgTask", // descriptive name
-	// 	4096, // stack size in words (esp32s3 is a 32 bit architecture)
-	// 	(void*)&samples_buf // values passed to the task function
-	// 	0, // task priority
-	// 	&computeAvgTask_handle // handle for managing the task
-	// );
-	// esp_task_wdt_add(computeAvgTask_handle);
-
+	// here i should initialize the sampling freq value
 	
-	// Commented for now, it produces a stack overflow somewhere
 	samples_buf_handle = xMessageBufferCreate((sizeof(size_t) + sizeof(int)) * ADC_SAMPLES_BUFFER_SIZE);
+	sampling_freq = 10; //Hz
+	wait_time_ticks = pdMS_TO_TICKS(0.8 * (1000 / sampling_freq)); // 80% of sampling period [ms]
+	running_avg_period_s = 1; // average over 5 seconds time window
 	
 	TaskHandle_t samplingTask_handle;
 	xTaskCreate(
@@ -109,6 +111,16 @@ void app_main(void)
 		&samplingTask_handle // handle for managing the task
 	);
 	// esp_task_wdt_add(samplingTask_handle);
+
+	TaskHandle_t runningAvgTask_handle;
+	xTaskCreate(
+		runningAvgTask, // name of func that implements the task
+		"runningAvgTask", // descriptive name
+		4096, // stack size in words (esp32s3 is a 32 bit architecture)
+		NULL, // values passed to the task function
+		0, // task priority
+		&runningAvgTask_handle // handle for managing the task
+	);
 
 	
 }
