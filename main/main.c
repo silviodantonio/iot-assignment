@@ -47,13 +47,14 @@ void runningAvgTask (void *arg)
 			// esp_task_wdt_reset();
 		}
 
-		printf("Average value over %u s: %d\n", running_avg_time_window_s, avg);
+		// printf("Average value over %u s: %d\n", running_avg_time_window_s, avg);
 		
 		// send data via MQTT
 		char int_string[11];
 		sprintf(int_string, "%d", avg);
 
 		esp_mqtt_client_publish(mqtt_client_handle, "/topic/qos0", int_string, 0, 0, 0);
+		vTaskDelay(pdMS_TO_TICKS(running_avg_time_window_s * 1000));
 	}
 
 }
@@ -123,6 +124,8 @@ void adjust_sampling_freq()
 
 void app_main(void)
 {
+	wifi_init();
+	mqtt_client_handle = mqtt_app_start();
 
 	// Configuring and initializing ADC
 	adc_oneshot_unit_init_cfg_t adc_unit_cfg = {
@@ -144,9 +147,6 @@ void app_main(void)
 
 	samples_buf_handle = xMessageBufferCreate((sizeof(size_t) + sizeof(int)) * ADC_SAMPLES_BUFFER_SIZE);
 	
-	// wifi_init();
-	// mqtt_client_handle = mqtt_app_start();
-	
 	wait_time_ticks = pdMS_TO_TICKS(0.8 * (1000 / sampling_freq)); // 80% of sampling period [ms]
 	
 	TaskHandle_t samplingTask_handle;
@@ -160,8 +160,7 @@ void app_main(void)
 	);
 	// esp_task_wdt_add(samplingTask_handle);
 
-	/*
-	running_avg_time_window_s = 1;
+	running_avg_time_window_s = 5;
 
 	TaskHandle_t runningAvgTask_handle;
 	xTaskCreate(
@@ -172,7 +171,5 @@ void app_main(void)
 		0,
 		&runningAvgTask_handle
 	);
-
-	*/
 	
 }
