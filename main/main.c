@@ -19,26 +19,26 @@
 #include "mqtt.h"
 
 static const char* MAIN_TAG = "Main task";
+static adc_oneshot_unit_handle_t adc_handle;
 static MessageBufferHandle_t samples_buf_handle;
-static unsigned int running_avg_period_s;
-static float sampling_freq = 0;
+static unsigned int running_avg_time_window_s;
+static float sampling_freq;
 static unsigned int wait_time_ticks;
 static esp_mqtt_client_handle_t mqtt_client_handle;
 
 void runningAvgTask (void *arg)
 {
 
-	unsigned int window_size = sampling_freq * running_avg_period_s;
+	unsigned int window_size = sampling_freq * running_avg_time_window_s;
+	
+	// Wait for a window-time to be sure to have values in the message buf
+	vTaskDelay(pdMS_TO_TICKS(running_avg_time_window_s * 1000));
 
 	while(1) {
 
 		int avg = 0;
 		int val_read;
 		unsigned int samples_count = 0;
-
-		// Compute average only after enough samples have
-		// been collected
-		vTaskDelay(pdMS_TO_TICKS(running_avg_period_s * 1000));
 		
 		while(samples_count < window_size) {
 			xMessageBufferReceive(samples_buf_handle, &val_read, sizeof(int), wait_time_ticks);
@@ -47,19 +47,83 @@ void runningAvgTask (void *arg)
 			// esp_task_wdt_reset();
 		}
 
-		printf("Average value over %u s: %d\n", running_avg_period_s, avg);
+		printf("Average value over %u s: %d\n", running_avg_time_window_s, avg);
 		
+		// send data via MQTT
 		char int_string[11];
 		sprintf(int_string, "%d", avg);
 
 		esp_mqtt_client_publish(mqtt_client_handle, "/topic/qos0", int_string, 0, 0, 0);
-		// Then the data should be sent to MQTT
 	}
 
 }
 
 void samplingTask (void *arg)
 {
+	// Compute delay for obtaining the desired sampling frequency
+	unsigned int delay_period_ms = (unsigned int)(1000 / sampling_freq);
+
+	// Sampling loop
+	int sample_val;
+	while(1) {
+		ESP_ERROR_CHECK(adc_oneshot_read(adc_handle, ADC_CHANNEL, &sample_val));
+		xMessageBufferSend(samples_buf_handle, &sample_val, sizeof(int), wait_time_ticks);
+		vTaskDelay(pdMS_TO_TICKS(delay_period_ms));
+	}
+	
+}
+
+void adjust_sampling_freq()
+{
+	// Measuring max sampling freq
+	int dummy_sample;
+	unsigned int num_test_samples = 100000;
+
+	int *samples_buf = calloc(ADC_SAMPLES_BUFFER_SIZE, sizeof(int));
+
+	ESP_LOGI(MAIN_TAG, "Computing max sampling frequency...");
+
+	unsigned int start_time = xTaskGetTickCount();
+	for(size_t i = 0; i < num_test_samples; i++){
+		adc_oneshot_read(adc_handle, ADC_CHANNEL, &dummy_sample);
+		samples_buf[i % ADC_SAMPLES_BUFFER_SIZE] = dummy_sample;
+	}
+	unsigned int sampling_duration_ticks = xTaskGetTickCount() - start_time;
+
+	float sampling_duration_sec = pdTICKS_TO_MS(sampling_duration_ticks) / 1000;
+	float max_sampling_freq_hz = num_test_samples / sampling_duration_sec;
+	
+	ESP_LOGI(MAIN_TAG, "Took %f seconds to sample %d", sampling_duration_sec, num_test_samples);
+	ESP_LOGI(MAIN_TAG, "Estimated max sampling frequency is: %f Hz", max_sampling_freq_hz);
+
+	// printf("Printing samples:");
+	// for(int i = 0; i < ADC_SAMPLES_BUFFER_SIZE; i++){
+	// 	printf("%d\n", samples_buf[i]);
+	// }
+
+	// getting max frequency of sampled signal
+	float max_signal_freq = get_max_freq(samples_buf, max_sampling_freq_hz);
+
+	ESP_LOGI(MAIN_TAG, "Frequency with max magnitude: %f Hz", max_signal_freq);
+
+	// adjusting sampling frequency
+	if ( max_signal_freq * 2.2 < max_sampling_freq_hz / 2) {
+		sampling_freq = max_signal_freq * 2.2;
+	}
+	else {
+		sampling_freq = max_signal_freq * 2;
+	}
+
+	ESP_LOGI(MAIN_TAG, "Adjusted sampling freq at %f Hz", sampling_freq);
+
+	free(samples_buf);
+
+}
+
+
+void app_main(void)
+{
+
 	// Configuring and initializing ADC
 	adc_oneshot_unit_init_cfg_t adc_unit_cfg = {
 		.unit_id = ADC_UNIT,
@@ -67,59 +131,23 @@ void samplingTask (void *arg)
 		.ulp_mode = ADC_ULP_MODE_DISABLE,
 	};
 
-	adc_oneshot_unit_handle_t adc_handle;	// This could be moved into global scope
 	ESP_ERROR_CHECK(adc_oneshot_new_unit(&adc_unit_cfg, &adc_handle));
 
 	adc_oneshot_chan_cfg_t adc_chan_cfg = {
 		.bitwidth = ADC_BITWIDTH_DEFAULT,	// Defaults to max bitwidth (12 bits for ESP32-S3)
-		.atten = ADC_ATTEN_DB_6,
+		.atten = ADC_ATTEN_DB_12,
 	};
 
 	ESP_ERROR_CHECK(adc_oneshot_config_channel(adc_handle, ADC_CHANNEL, &adc_chan_cfg));
 
-	// Measure time taken for sampling a fixed amount of samples (max frequency)
-	int dummy_sample;
-	unsigned int num_test_samples = 100000;
-	unsigned int start_time = xTaskGetTickCount();
-	for(size_t i = 0; i < num_test_samples; i++){
-		adc_oneshot_read(adc_handle, ADC_CHANNEL, &dummy_sample);
-	}
-	unsigned int sampling_duration_ticks = xTaskGetTickCount() - start_time;
-	float sampling_duration_sec = pdTICKS_TO_MS(sampling_duration_ticks) / 1000;
-	float max_sampling_freq_hz = num_test_samples / sampling_duration_sec;
-	
-	ESP_LOGI(MAIN_TAG, "Took %f seconds to sample %d", sampling_duration_sec, num_test_samples);
-	ESP_LOGI(MAIN_TAG, "Estimated max sampling frequency is: %f Hz", max_sampling_freq_hz);
-	
-	// Compute delay for obtaining the desired sampling frequency
-	unsigned delay = 1000 / sampling_freq;
+	adjust_sampling_freq();
 
-	// Sampling loop
-	while(1) {
-		int sample_val;
-		int send_ret;
-		ESP_ERROR_CHECK(adc_oneshot_read(adc_handle, ADC_CHANNEL, &sample_val));
-		// Note: ticks to wait could be set to a value less than the used sampling rate
-		// (that must be computed beforehand)
-		// printf("ADC Read: %d\n", sample_val);
-		send_ret = xMessageBufferSend(samples_buf_handle, &sample_val, sizeof(int), wait_time_ticks);
-		// printf("Written %d bytes to message buffer\n", send_ret);
-		vTaskDelay(pdMS_TO_TICKS(delay));
-	}
-	
-}
-
-
-void app_main(void)
-{
-
-	wifi_init();
-	mqtt_client_handle = mqtt_app_start();
-	
 	samples_buf_handle = xMessageBufferCreate((sizeof(size_t) + sizeof(int)) * ADC_SAMPLES_BUFFER_SIZE);
-	sampling_freq = 10; //Hz
+	
+	// wifi_init();
+	// mqtt_client_handle = mqtt_app_start();
+	
 	wait_time_ticks = pdMS_TO_TICKS(0.8 * (1000 / sampling_freq)); // 80% of sampling period [ms]
-	running_avg_period_s = 1; // average over 5 seconds time window
 	
 	TaskHandle_t samplingTask_handle;
 	xTaskCreate(
@@ -132,6 +160,9 @@ void app_main(void)
 	);
 	// esp_task_wdt_add(samplingTask_handle);
 
+	/*
+	running_avg_time_window_s = 1;
+
 	TaskHandle_t runningAvgTask_handle;
 	xTaskCreate(
 		runningAvgTask,
@@ -141,5 +172,7 @@ void app_main(void)
 		0,
 		&runningAvgTask_handle
 	);
+
+	*/
 	
 }

@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <stdio.h>
+#include <math.h>
 #include "sampling.h"
 
 #include <stdio.h>
@@ -130,51 +131,64 @@ void get_min_max(int *samples_buf, int *min_val, int *max_val)
 
 // This function should use the FFT in order to compute the max frequency of the
 // signal that can be used for adjusting the sampling rate of the ADC
-void get_max_freq(int *adc_buf, float sampling_freq)
+float get_max_freq(int *adc_buf, float sampling_freq)
 {
 
 	// Allocate FFT working buffer (initialize to all zeroes)
 	float *fft_buf = calloc(ADC_SAMPLES_BUFFER_SIZE*2, sizeof(float));
+	// float fft_buf[ADC_SAMPLES_BUFFER_SIZE];
 	
 	// Move samples into FFT buffer
 	for(int i = 0; i < ADC_SAMPLES_BUFFER_SIZE; i++) {
-		fft_buf[i * 2] = adc_buf[i];
+		fft_buf[i * 2] = (float)adc_buf[i];
 	}
 
+	//init fft
+	dsps_fft2r_init_fc32(NULL, ADC_SAMPLES_BUFFER_SIZE);
+	
 	// Execute fft
-	dsps_fft2r_fc32_ansi_(fft_buf, 0, NULL);
+	dsps_fft2r_fc32(fft_buf, ADC_SAMPLES_BUFFER_SIZE);
+	dsps_bit_rev_fc32(fft_buf, ADC_SAMPLES_BUFFER_SIZE);
 
-	dsps_bit_rev_fc32_ansi(fft_buf, 0); // Is this for ABS number?
-	dsps_cplx2reC_fc32_ansi(fft_buf, 0);  // This de-interleaves, however i think there's also a different function
+	// dsps_cplx2reC_fc32_ansi(fft_buf, 0);  // This de-interleaves, however i think there's also a different function
 
-	// find max value. Since the values should be simmetric, just searching
-	// in half of the array.
-	int max_index = 0;
-	float max_val = fft_buf[0];
+	// Calculating the magnitudes
+	for(int i = 0; i < ADC_SAMPLES_BUFFER_SIZE / 2; i++) {
+		fft_buf[i] = sqrt(fft_buf[i * 2] * fft_buf[i * 2] +
+				fft_buf[i * 2 + 1] * fft_buf[i * 2 + 1]);
+	}
 
-	for(int i = 1; i < ADC_SAMPLES_BUFFER_SIZE/2; i++) {
+        // find frequency with max magnitude. Since the values should be
+        // simmetric, just searching in half of the array.
+        int max_index = 1;
+	float max_val = fft_buf[1]; // skipping the first value
+
+	for(int i = 2; i < ADC_SAMPLES_BUFFER_SIZE/2; i++) {
 		if (max_val < fft_buf[i]){
 			max_index = i;
 			max_val = fft_buf[i];
 		}
 	}
-
-	int min_index = 0;
-	float min_val = fft_buf[0];
-	for(int i = 1; i < ADC_SAMPLES_BUFFER_SIZE/2; i++) {
-		if (min_index > fft_buf[i]){
-			min_index = i;
-			min_val = fft_buf[i];
-		}
-	}
 	
-	// compute frequency of said max value
+	// compute frequency of max value
 	float freq_step = sampling_freq / ADC_SAMPLES_BUFFER_SIZE;
-	
-	printf("Frequency bin size: %f\n", freq_step);
 
-	printf("Max magnitude: %f @ %f\n", max_val, max_index * freq_step);
-	printf("Min magnitude: %f @ %f\n", min_val, min_index * freq_step);
+	// for(int i = 0; i < ADC_SAMPLES_BUFFER_SIZE/2; i++){
+	// 	printf("%d Hz: %d\n", (int)(i * freq_step), (int)fft_buf[i]);
+	// }
+	
+	// printf("Frequency bin size: %f\n", freq_step);
+	//
+	// printf("Max magnitude: %f @ %f [index %d]\n", max_val, max_index * freq_step, max_index);
+	// printf("Min magnitude: %f @ %f [index %d]\n", min_val, min_index * freq_step, min_index);
 
 	free(fft_buf);
+
+	float max_magnitude_freq = freq_step * max_index;
+	if (max_magnitude_freq < 1000) {
+		ESP_LOGW(SAMPLING_TAG, "Frequency found could be wrong, setting to 1kHz");
+		max_magnitude_freq = (float) 1000;
+	}
+
+	return max_magnitude_freq;
 }
