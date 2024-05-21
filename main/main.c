@@ -10,6 +10,7 @@
 #include "esp_log.h"
 // #include "esp_task_wdt.h"
 #include "esp_adc/adc_oneshot.h"
+#include "soc/soc_caps.h"
 
 #include "mqtt_client.h"
 #include "project_constants.h"
@@ -21,7 +22,7 @@
 static const char* MAIN_TAG = "Main task";
 static adc_oneshot_unit_handle_t adc_handle;
 static MessageBufferHandle_t samples_buf_handle;
-static unsigned int running_avg_time_window_s;
+static unsigned int running_avg_time_window_s = AVG_TIME_WINDOW_S;
 static float sampling_freq;
 static unsigned int wait_time_ticks;
 static esp_mqtt_client_handle_t mqtt_client_handle;
@@ -96,6 +97,8 @@ void adjust_sampling_freq()
 	
 	ESP_LOGI(MAIN_TAG, "Took %f seconds to sample %d", sampling_duration_sec, num_test_samples);
 	ESP_LOGI(MAIN_TAG, "Estimated max sampling frequency is: %f Hz", max_sampling_freq_hz);
+	ESP_LOGI(MAIN_TAG, "SOC_ADC_SAMPLE_FREQ_THRESH_HIGH: %d Hz", SOC_ADC_SAMPLE_FREQ_THRES_HIGH);
+
 
 	// printf("Printing samples:");
 	// for(int i = 0; i < ADC_SAMPLES_BUFFER_SIZE; i++){
@@ -159,8 +162,6 @@ void app_main(void)
 		&samplingTask_handle
 	);
 	// esp_task_wdt_add(samplingTask_handle);
-
-	running_avg_time_window_s = 5;
 
 	TaskHandle_t runningAvgTask_handle;
 	xTaskCreate(
