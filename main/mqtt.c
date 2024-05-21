@@ -5,20 +5,22 @@
 #include "esp_netif_types.h"
 #include "esp_system.h"
 #include "esp_event.h"
+#include "project_constants.h"
 
 #include "esp_log.h"
 #include "esp_wifi_types.h"
 #include "freertos/idf_additions.h"
 #include "freertos/event_groups.h"
 #include "freertos/projdefs.h"
+#include "freertos/task.h"
+#include "freertos/projdefs.h"
 #include "mqtt_client.h"
-#include "portmacro.h"
 
 #define WIFI_GOT_IP BIT0
 
 char *MQTT_TAG = "MQTT";
 
-static const char *BROKER_ADDRESS = "mqtt://mqtt.eclipseprojects.io";
+static const char *BROKER_ADDRESS = MQTT_BROKER_ADDRESS;
 static EventGroupHandle_t wifi_event_group;
 
 static void log_error_if_nonzero(const char *message, int error_code)
@@ -47,39 +49,49 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 
     switch ((esp_mqtt_event_id_t)event_id) {
     case MQTT_EVENT_CONNECTED:
-        ESP_LOGI(MQTT_TAG, "MQTT_EVENT_CONNECTED");
-        msg_id = esp_mqtt_client_publish(client, "/topic/qos1", "data_3", 0, 1, 0);
-        ESP_LOGI(MQTT_TAG, "sent publish successful, msg_id=%d", msg_id);
 
-        msg_id = esp_mqtt_client_subscribe(client, "/topic/qos0", 0);
+        msg_id = esp_mqtt_client_subscribe(client, "/topic/soda/avg-samples", 0);
         ESP_LOGI(MQTT_TAG, "sent subscribe successful, msg_id=%d", msg_id);
 
-        msg_id = esp_mqtt_client_subscribe(client, "/topic/qos1", 1);
+        /*
+        // Measuring RTT
+        msg_id = esp_mqtt_client_subscribe(client, "/topic/soda/rtt", 0);
         ESP_LOGI(MQTT_TAG, "sent subscribe successful, msg_id=%d", msg_id);
 
-        msg_id = esp_mqtt_client_unsubscribe(client, "/topic/qos1");
-        ESP_LOGI(MQTT_TAG, "sent unsubscribe successful, msg_id=%d", msg_id);
-        break;
-    case MQTT_EVENT_DISCONNECTED:
-        ESP_LOGI(MQTT_TAG, "MQTT_EVENT_DISCONNECTED");
+        for (int i = 0; i < 3; i++) {
+                char timestamp_str[24];
+                sprintf(timestamp_str, "%lu", xTaskGetTickCount());
+                esp_mqtt_client_publish(client, "/topic/soda/rtt", timestamp_str, 0, 0, 0);
+        };
+        */
+
         break;
 
     case MQTT_EVENT_SUBSCRIBED:
         ESP_LOGI(MQTT_TAG, "MQTT_EVENT_SUBSCRIBED, msg_id=%d", event->msg_id);
-        msg_id = esp_mqtt_client_publish(client, "/topic/qos0", "data", 0, 0, 0);
-        ESP_LOGI(MQTT_TAG, "sent publish successful, msg_id=%d", msg_id);
         break;
-    case MQTT_EVENT_UNSUBSCRIBED:
-        ESP_LOGI(MQTT_TAG, "MQTT_EVENT_UNSUBSCRIBED, msg_id=%d", event->msg_id);
-        break;
-    case MQTT_EVENT_PUBLISHED:
-        ESP_LOGI(MQTT_TAG, "MQTT_EVENT_PUBLISHED, msg_id=%d", event->msg_id);
-        break;
+
     case MQTT_EVENT_DATA:
         ESP_LOGI(MQTT_TAG, "MQTT_EVENT_DATA");
+        
+        /*
+        // Uncomment this for measuring packet latencies
+        // i couldn't get strcmp to work correctly
+        if (strcmp(event->topic, "/topic/soda/rtt") == 0) {
+
+            unsigned int arrived_timestamp = xTaskGetTickCount();
+            unsigned int sent_timestamp = atoi(event->data);
+            unsigned int latency = (arrived_timestamp - sent_timestamp) / 2;
+
+            ESP_LOGI(MQTT_TAG, "Message had latency: %lu mS\n", pdTICKS_TO_MS(latency));
+        }
+        */
+
         printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
         printf("DATA=%.*s\r\n", event->data_len, event->data);
+
         break;
+
     case MQTT_EVENT_ERROR:
         ESP_LOGI(MQTT_TAG, "MQTT_EVENT_ERROR");
         if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT) {
@@ -100,6 +112,7 @@ static void mqtt_init_handler(void* arg, esp_event_base_t event_base, int32_t ev
 {
     if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         xEventGroupSetBits(wifi_event_group, WIFI_GOT_IP);
+        ESP_LOGI(MQTT_TAG, "Starting MQTT module, event bit set");
     }
 
 }
@@ -110,15 +123,13 @@ esp_mqtt_client_handle_t mqtt_app_start(void)
 
     wifi_event_group = xEventGroupCreate();
 
-    // Init and configure (move here)
-
     esp_mqtt_client_config_t mqtt_cfg = {
         .broker.address.uri = BROKER_ADDRESS,
     };
 
     esp_mqtt_client_handle_t client = esp_mqtt_client_init(&mqtt_cfg);
     esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
-
+    // esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_measure_rtt, NULL);
 
     esp_event_handler_instance_t mqtt_init_handler_instance;
     esp_event_handler_instance_register(IP_EVENT,
@@ -132,7 +143,7 @@ esp_mqtt_client_handle_t mqtt_app_start(void)
                         WIFI_GOT_IP,
                         pdFALSE,
                         pdFALSE,
-                        portMAX_DELAY);
+                        pdMS_TO_TICKS( WIFI_MAX_ATTEMPTS * 3 * 1000));
 
     // if everyting is ok then start mqtt
     if ((return_bit & BIT0) == true) {
@@ -143,6 +154,5 @@ esp_mqtt_client_handle_t mqtt_app_start(void)
         ESP_LOGW(MQTT_TAG, "Couldn't start, didn't get an IP address");
         return NULL;
     }
-
 
 }

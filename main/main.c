@@ -3,13 +3,14 @@
 #include <stdlib.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
-#include "freertos/projdefs.h" // I hope that this works
+#include "freertos/projdefs.h"
 #include "freertos/task.h"
 #include "freertos/message_buffer.h"
 #include "esp_err.h"
 #include "esp_log.h"
 // #include "esp_task_wdt.h"
 #include "esp_adc/adc_oneshot.h"
+#include "hal/adc_types.h"
 #include "soc/soc_caps.h"
 
 #include "mqtt_client.h"
@@ -25,37 +26,42 @@ static MessageBufferHandle_t samples_buf_handle;
 static unsigned int running_avg_time_window_s = AVG_TIME_WINDOW_S;
 static float sampling_freq;
 static unsigned int wait_time_ticks;
-static esp_mqtt_client_handle_t mqtt_client_handle;
+static esp_mqtt_client_handle_t mqtt_client_handle = NULL;
 
 void runningAvgTask (void *arg)
 {
 
-	unsigned int window_size = sampling_freq * running_avg_time_window_s;
+	size_t window_size = sampling_freq * running_avg_time_window_s;
+	unsigned int time_window_ms = running_avg_time_window_s * 1000;
 	
 	// Wait for a window-time to be sure to have values in the message buf
-	vTaskDelay(pdMS_TO_TICKS(running_avg_time_window_s * 1000));
+	vTaskDelay(pdMS_TO_TICKS(time_window_ms));
 
 	while(1) {
 
-		int avg = 0;
+		float avg = 0;
 		int val_read;
-		unsigned int samples_count = 0;
+		size_t samples_count = 0;
 		
 		while(samples_count < window_size) {
 			xMessageBufferReceive(samples_buf_handle, &val_read, sizeof(int), wait_time_ticks);
-			avg += (val_read) / window_size;
+			// printf("Message buffer READ: %d\n", val_read);
+			avg += (float) val_read / window_size;
 			samples_count++;
 			// esp_task_wdt_reset();
 		}
 
-		// printf("Average value over %u s: %d\n", running_avg_time_window_s, avg);
+		printf("Average value over %u s: %f\n", running_avg_time_window_s, avg);
 		
 		// send data via MQTT
-		char int_string[11];
-		sprintf(int_string, "%d", avg);
+		if(mqtt_client_handle != NULL) {
+			char val_string[24];
+			sprintf(val_string, "%f", avg);
 
-		esp_mqtt_client_publish(mqtt_client_handle, "/topic/qos0", int_string, 0, 0, 0);
-		vTaskDelay(pdMS_TO_TICKS(running_avg_time_window_s * 1000));
+			esp_mqtt_client_publish(mqtt_client_handle, "/topic/soda/avg-samples", val_string, 0, 0, 0);
+		}
+
+		vTaskDelay(pdMS_TO_TICKS(time_window_ms));
 	}
 
 }
@@ -69,6 +75,7 @@ void samplingTask (void *arg)
 	int sample_val;
 	while(1) {
 		ESP_ERROR_CHECK(adc_oneshot_read(adc_handle, ADC_CHANNEL, &sample_val));
+		// printf("Sampled: %d\n", sample_val);
 		xMessageBufferSend(samples_buf_handle, &sample_val, sizeof(int), wait_time_ticks);
 		vTaskDelay(pdMS_TO_TICKS(delay_period_ms));
 	}
@@ -79,23 +86,23 @@ void adjust_sampling_freq()
 {
 	// Measuring max sampling freq
 	int dummy_sample;
-	unsigned int num_test_samples = 100000;
+	unsigned int num_test_samples = ADC_SAMPLES_BUFFER_SIZE * 100;
 
 	int *samples_buf = calloc(ADC_SAMPLES_BUFFER_SIZE, sizeof(int));
 
 	ESP_LOGI(MAIN_TAG, "Computing max sampling frequency...");
 
-	unsigned int start_time = xTaskGetTickCount();
+	long unsigned start_time = xTaskGetTickCount();
 	for(size_t i = 0; i < num_test_samples; i++){
 		adc_oneshot_read(adc_handle, ADC_CHANNEL, &dummy_sample);
 		samples_buf[i % ADC_SAMPLES_BUFFER_SIZE] = dummy_sample;
 	}
-	unsigned int sampling_duration_ticks = xTaskGetTickCount() - start_time;
+	long unsigned sampling_duration_ticks = xTaskGetTickCount() - start_time;
 
-	float sampling_duration_sec = pdTICKS_TO_MS(sampling_duration_ticks) / 1000;
-	float max_sampling_freq_hz = num_test_samples / sampling_duration_sec;
+	long unsigned sampling_duration_sec = pdTICKS_TO_MS(sampling_duration_ticks) / 1000;
+	float max_sampling_freq_hz = (float) num_test_samples / sampling_duration_sec;
 	
-	ESP_LOGI(MAIN_TAG, "Took %f seconds to sample %d", sampling_duration_sec, num_test_samples);
+	ESP_LOGI(MAIN_TAG, "Took %lu seconds to sample %u", sampling_duration_sec, num_test_samples);
 	ESP_LOGI(MAIN_TAG, "Estimated max sampling frequency is: %f Hz", max_sampling_freq_hz);
 	ESP_LOGI(MAIN_TAG, "SOC_ADC_SAMPLE_FREQ_THRESH_HIGH: %d Hz", SOC_ADC_SAMPLE_FREQ_THRES_HIGH);
 
@@ -127,8 +134,6 @@ void adjust_sampling_freq()
 
 void app_main(void)
 {
-	wifi_init();
-	mqtt_client_handle = mqtt_app_start();
 
 	// Configuring and initializing ADC
 	adc_oneshot_unit_init_cfg_t adc_unit_cfg = {
@@ -172,5 +177,8 @@ void app_main(void)
 		0,
 		&runningAvgTask_handle
 	);
+
+	wifi_init();
+	mqtt_client_handle = mqtt_app_start();
 	
 }

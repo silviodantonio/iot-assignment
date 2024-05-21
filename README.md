@@ -44,7 +44,7 @@ and limitations of their implementation.
 
 ### Sampling
 
-In this section i will show what is being said in the [TRM] (https://www.espressif.com/sites/default/files/documentation/esp32-s3_technical_reference_manual_en.pdf)
+In this section i will show what is being said in the [TRM](https://www.espressif.com/sites/default/files/documentation/esp32-s3_technical_reference_manual_en.pdf)
 (Technical Reference Manual) of the chip about the maximum sampling
 capabilities, and showing what are the performances of my implementation.
 At the end of this section i will discuss some improvements of it.
@@ -58,7 +58,7 @@ clock sources can be chosen.
 By requirements of the assignment, i will focus the discussion on finding the
 limits of such controllers.
 
-The High performance controller is called DIG ADC1. [In this section of the TRM]()
+The High performance controller is called DIG ADC1. [In this section of the TRM](https://www.espressif.com/sites/default/files/documentation/esp32-s3_technical_reference_manual_en.pdf#paragraph.39.3.7.1)
 it is stated that "The ADC needs 25 DIGADC_SARCLK clock cycles per sample, so
 the maximum sampling rate is limited by the DIGADC_SARCLK frequency".
 The DIGADC_SARCKL is the operating clock of DIG ADC1 and its value is obtained
@@ -108,7 +108,7 @@ count function.
 The approach i've used is upper bounded by the speed at which the cpu executes
 the sampling loop. An improvement could be to set the CPU at maximum clock speed,
 that is 240MHz. The default setting is 20MHz, [as declared in the
-TRM](https://www.espressif.com/sites/default/files/documentation/esp32-s3_technical_reference_manual_en.pdf#subsubsection.7.2.4).
+TRM](https://www.espressif.com/sites/default/files/documentation/esp32-s3_technical_reference_manual_en.pdf#paragraph.7.2.4.1).
 Another approach could be to move the driver from oneshot mode to [continuos mode](https://docs.espressif.com/projects/esp-idf/en/v5.2.1/esp32s3/api-reference/peripherals/adc_continuous.html).
 The ADC driver can be configured to work at a specified frequency in Hz. The range of
 this value is declared in the `soc/soc_caps.h` header.

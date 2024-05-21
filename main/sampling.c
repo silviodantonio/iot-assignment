@@ -153,10 +153,18 @@ float get_max_freq(int *adc_buf, float sampling_freq)
 	// dsps_cplx2reC_fc32_ansi(fft_buf, 0);  // This de-interleaves, however i think there's also a different function
 
 	// Calculating the magnitudes
+	//
+
 	for(int i = 0; i < ADC_SAMPLES_BUFFER_SIZE / 2; i++) {
 		fft_buf[i] = sqrt(fft_buf[i * 2] * fft_buf[i * 2] +
 				fft_buf[i * 2 + 1] * fft_buf[i * 2 + 1]);
 	}
+
+	// for(int i = 0; i < ADC_SAMPLES_BUFFER_SIZE / 2; i++) {
+	// 	fft_buf[i] = 10 * log10f(fft_buf[i * 2] * fft_buf[i * 2] +
+	// 			fft_buf[i * 2 + 1] * fft_buf[i * 2 + 1]
+	// 			/ ADC_SAMPLES_BUFFER_SIZE );
+	// }
 
         // find frequency with max magnitude. Since the values should be
         // simmetric, just searching in half of the array.
@@ -171,7 +179,7 @@ float get_max_freq(int *adc_buf, float sampling_freq)
 	}
 	
 	// compute frequency of max value
-	float freq_step = sampling_freq / ADC_SAMPLES_BUFFER_SIZE;
+	float bin_width = sampling_freq / ADC_SAMPLES_BUFFER_SIZE;
 
 	// for(int i = 0; i < ADC_SAMPLES_BUFFER_SIZE/2; i++){
 	// 	printf("%d Hz: %d\n", (int)(i * freq_step), (int)fft_buf[i]);
@@ -184,7 +192,7 @@ float get_max_freq(int *adc_buf, float sampling_freq)
 
 	free(fft_buf);
 
-	float max_magnitude_freq = freq_step * max_index;
+	float max_magnitude_freq = bin_width * max_index;
 	if (max_magnitude_freq < 1000) {
 		ESP_LOGW(SAMPLING_TAG, "Frequency found could be wrong, setting to 1kHz");
 		max_magnitude_freq = (float) 1000;

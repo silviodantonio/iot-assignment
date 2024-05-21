@@ -14,6 +14,6 @@
 #define WIFI_PASS "iotproject"
 #define WIFI_MAX_ATTEMPTS 5
 
-// Add mqtt broker address here
+#define MQTT_BROKER_ADDRESS "mqtt://mqtt.eclipseprojects.io"
 
 #endif
