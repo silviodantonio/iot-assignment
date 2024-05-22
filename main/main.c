@@ -125,6 +125,14 @@ void adjust_sampling_freq()
 		sampling_freq = max_signal_freq * 2;
 	}
 
+	/*
+	// Manually testing sampling frequencies
+	sampling_freq = 10;
+	// sampling_freq = 100;
+	// sampling_freq = 1000;
+	// sampling_freq = 10000;
+	*/
+
 	ESP_LOGI(MAIN_TAG, "Adjusted sampling freq at %f Hz", sampling_freq);
 
 	free(samples_buf);

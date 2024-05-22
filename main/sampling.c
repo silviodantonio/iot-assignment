@@ -136,7 +136,15 @@ float get_max_freq(int *adc_buf, float sampling_freq)
 
 	// Allocate FFT working buffer (initialize to all zeroes)
 	float *fft_buf = calloc(ADC_SAMPLES_BUFFER_SIZE*2, sizeof(float));
-	// float fft_buf[ADC_SAMPLES_BUFFER_SIZE];
+	
+	/*
+	// Test with tone gen
+	float *test_buf = calloc(ADC_SAMPLES_BUFFER_SIZE, sizeof(float));
+	dsps_tone_gen_f32(test_buf, ADC_SAMPLES_BUFFER_SIZE, 1, 0.65, 0);
+	for(int i = 0; i < ADC_SAMPLES_BUFFER_SIZE; i++) {
+		fft_buf[i * 2] = test_buf[i];
+	}
+	*/
 	
 	// Move samples into FFT buffer
 	for(int i = 0; i < ADC_SAMPLES_BUFFER_SIZE; i++) {
@@ -150,11 +158,7 @@ float get_max_freq(int *adc_buf, float sampling_freq)
 	dsps_fft2r_fc32(fft_buf, ADC_SAMPLES_BUFFER_SIZE);
 	dsps_bit_rev_fc32(fft_buf, ADC_SAMPLES_BUFFER_SIZE);
 
-	// dsps_cplx2reC_fc32_ansi(fft_buf, 0);  // This de-interleaves, however i think there's also a different function
-
 	// Calculating the magnitudes
-	//
-
 	for(int i = 0; i < ADC_SAMPLES_BUFFER_SIZE / 2; i++) {
 		fft_buf[i] = sqrt(fft_buf[i * 2] * fft_buf[i * 2] +
 				fft_buf[i * 2 + 1] * fft_buf[i * 2 + 1]);
@@ -194,7 +198,7 @@ float get_max_freq(int *adc_buf, float sampling_freq)
 
 	float max_magnitude_freq = bin_width * max_index;
 	if (max_magnitude_freq < 1000) {
-		ESP_LOGW(SAMPLING_TAG, "Frequency found could be wrong, setting to 1kHz");
+		ESP_LOGW(SAMPLING_TAG, "Frequency found could be wrong (was %f), setting to 1kHz", max_magnitude_freq);
 		max_magnitude_freq = (float) 1000;
 	}
 
