@@ -198,8 +198,8 @@ float get_max_freq(int *adc_buf, float sampling_freq)
 
 	float max_magnitude_freq = bin_width * max_index;
 	if (max_magnitude_freq < 1000) {
-		ESP_LOGW(SAMPLING_TAG, "Frequency found could be wrong (was %f), setting to 1kHz", max_magnitude_freq);
-		max_magnitude_freq = (float) 1000;
+		ESP_LOGW(SAMPLING_TAG, "Frequency found could be wrong (was %f)", max_magnitude_freq);
+		// max_magnitude_freq = (float) 1000;
 	}
 
 	return max_magnitude_freq;

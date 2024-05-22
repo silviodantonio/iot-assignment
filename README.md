@@ -42,14 +42,14 @@ board, that is equipped with an ESP32-S3.
 Follows a more detailed explanations of key functionalities and known issues
 and limitations of their implementation.
 
-### Sampling
+## Sampling
 
 In this section i will show what is being said in the [TRM](https://www.espressif.com/sites/default/files/documentation/esp32-s3_technical_reference_manual_en.pdf)
 (Technical Reference Manual) of the chip about the maximum sampling
 capabilities, and showing what are the performances of my implementation.
 At the end of this section i will discuss some improvements of it.
 
-#### The theory
+### The theory
 
 Looking at the ADC section of the TRM, we can see that the chip is equipped
 with two ADC units, each of them can be controlled by two controllers. One for
@@ -83,27 +83,38 @@ that the (theoretical) maximum sampling frequency is about 1 / 0,1 uS which is *
 Just for completeness, if the frequency of DIGADC_SARCLK is higher than 5 MHz
 the sampling precision is lowered.
 
-#### In practice
+### In practice
 
-For the implementation of the component that does the sampling i've
-used the the ADC in ["Oneshot mode"](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/api-reference/peripherals/adc_oneshot.html).
-This modes uses the digital controller and i've configured it in order to use the fastest clock:
+For the component that does the sampling i've used the the ADC driver in
+["Oneshot mode"](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/api-reference/peripherals/adc_oneshot.html).
+This modes uses a digital controller for the ADC and i've configured it in order to use the fastest clock:
 PLL_D2.
 
-For taking continuous measurements, the function call used to take a single
-sample is called inside an endless loop.
+For taking continuously measurements, the function call used to take a single
+sample is used inside an endless loop.
+
+```
+samples = N;
+
+start = get_tick_count();
+while(samples < N) {
+    get_sample()
+    samples++
+}
+duration = ticks_to_sec( get_tick_count() - start))
+freq = N / duration;
+```
 
 I approximatively measured the maximium sampling frequency of this approach
-taking a fixed amount of samples and getting the tick count from FreeRTOS before
+taking a fixed amount of samples, getting the tick count from FreeRTOS before
 and after the sampling cycle.
-After having converted the tick count to a time value, knowing the amount of
-samples that i took could compute the sampling frequency, which is around
-**30 kHz**. This sampling frequency is useful to sample input signals that have
-a maximum a frequency of 15 kHz.
+After having converted the tick count to a time value, I've measured a
+maximium sampling frequency of around **30 kHz**. This sampling frequency is
+useful to sample input signals that have a maximum a frequency of 15 kHz.
 The accuracy of this measurements are limited by the accuracy of the FreeRTOS tick
 count function.
 
-#### Improvements
+### Improvements
 
 The approach i've used is upper bounded by the speed at which the cpu executes
 the sampling loop. An improvement could be to set the CPU at maximum clock speed,
@@ -117,46 +128,45 @@ frequency of about **83 kHz**.
 However, my guess is that interfacing directly with system registers is the way
 to get the maximum performance possible.
 
-### Adjusting sampling frequency
+## Adjusting sampling frequency
 
 At startup the device samples the input signal at maximum frequency, saving the
 values into a temporary buffer. This buffer is then passed as a parameter to
-a function that used the FFT that returs the frequency that has the highest
+a function that, using the FFT, returns the frequency that has the highest
 magnitude.
 
-For correctly sampling a signal, the frequency at which samples are
-taken must be at least 2x the maximum frequency.
-So the new sampling frequency is the value returned by this function multiplied
-by 2 plus a 20% safety factor.
+As for the sampling theorem, the frequency at which samples have to be
+taken must be at least 2x the maximum frequency of the input signal.
+So the frequency with maximum magnitude is multiplied by 2.2 (times 2 plus a 20%
+safety factor) and set as the new sampling frequency
 
-The new sampling frequency is applied by changing the rate at wich the sampling
+```
+sampling_freq = 2.2 * get_max_freq(samples)
+delay_ms = 1000 / sampling_freq 
+
+while(1) {
+    get_sample()
+    vTaskDelay(delay_ms)
+}
+```
+
+The new sampling frequency is enforced by changing the rate at wich the sampling
 loop is executed, using vTaskDelay.
-Starting from the required sampling frequency, the sampling period is computed,
-then converted in mS. The formula used is: `delay = (unsigned int)(1000/sampling_freq_hz)`
-This value is then converted in tick counts and passed to vTaskDelay.
-For minimizing rounding errors all these calculations are done with float
-numbers and converted to int just at the end.
 
+### Issues
 
-#### Issues
-
-When testing the FFT and sampling capabilities in general i've used audio
+When testing the FFT and sampling capabilities I've used an audio
 signals generated by an audio editing program (Audacity) fed into the MCU
 through an audio cable.
 
-- Signals with frequency below 1 kHz are not detected correctly.
-
-This has been measuerd through testing. Following this observation if
-the frequency returned by the FFT is less than 1 kHz it automatically discarded
-and 1 kHz is returned.
+Here some known issues with the implementation:
 
 - Adjusting sampling frequency does not work properly
 
 When computing the delay for adjusting the sampling frequency, the accuracy is poor.
 That's because all sampling frequencies above 1 kHz produce the same 0 delay value
-(check the formula used above). This, plus the fact that the fft doesn't detect
-correctly signals below 1 kHz means that unfortunately the resulting sampling
-frequency always the same.
+(check the snippet above). This will mean that gains in energy consumption for
+signals sampled above 1kHz will be negligible.
 
 - The function that uses the FFT returns the frequency that has the maximum magnitude,
 that is not necessarily the component of the signal that has the maximum frequency.
@@ -164,22 +174,31 @@ that is not necessarily the component of the signal that has the maximum frequen
 This means that if the samples are taken from a signal that is composed of two
 sine waves, one with high frequency and low amplitude and one with lower
 frequency and high amplitude, the function returns just the frequency of the
-signal with higer amplitude. However i've empirically measured that when overlapping
-two signals with the same volume the functon still returns the correct value
-(i.e.: the frequency of the higher frequency signal)
+signal with higer amplitude.
 
 - Signal that changes significantly over time
 
 Since the adjusted sampling frequency is calculated only once at startup,
-if the signal varies greatly in frequency over time, that frequency could be
-either completely wrong or doesn't provide any energy consumption benefits.
+if the signal varies greatly in frequency over time, the adjusted frequency
+could become either completely wrong or too high to provide any energy consumption
+benefits.
 
-### Transmitting average values
+## Transmitting average values
 
 Samples produced by the sampling task are stored in a message buffer.
 The task that computes the average reads from this message buffer and computes the average
 over a fixed time window. For example: if the time window is 1 second, then an
 average value is produced every second.
+
+```
+samples_num = sampling_freq * time window
+avg, i = 0
+
+while(i < samples_num) {
+    avg += get_sample() / samples_num
+    i ++
+}
+```
 
 The number of samples that the average function should read is computed at
 runtime using: `samples_num = sampling_frequency * time_window`
@@ -187,17 +206,46 @@ runtime using: `samples_num = sampling_frequency * time_window`
 The value is then sent to an MQTT broker.
 The process is repeated every `time_window` seconds, in order to wait for the
 sampling task to produce an adequate number of samples.
+Since the average value is computed over a fixed time-window the bandwith
+used is fixed over time. If the MCU can't get a stable connection to a wifi AP
+the MQTT module is never started.
 
 ## Performance evaluation
 
 ### Energy consumption
 
-- How i did it
-- Issues
-- Results
+For measuring energy consumptions i've used an Arduino Pro Micro clone, and
+a INA219 current sensor. For measuring current values from the sensor
+i've used the code provided in the Adafruit library for the sensor.
 
-### MQTT message RTT
+For testing I've manually set the adjusted sampling frequency to measure these
+values. The WiFi and MQTT module are the last ones to be started up.
 
-- How i did it
-- Results
+Sampling frequency | Oversampling (startup) | Adjusted | WiFi |
+-------------------|------------------------|----------|------|
+10 Hz | 65 mA | 48 mA | 112 mA
+100 Hz | 65 mA | 48 mA | 112 mA
+1 kHz | 65 mA | 48 mA | 112 mA
+10 kHz | 65 mA | 48 mA | 112 mA
 
+The energy values while oversampling are expected to be the same, since
+the MCU is sampling at max frequency.
+In these tests adjusting the sampling frequency (adding xTaskDelay) has proved
+to decrease generally by 7mA the energy consumption, however there's no energy
+gain between sampling at low vs high frequency, which is pretty unexpected and
+requires further investigation.
+Just enabling the WiFi module increases baseline energy consumption by 64mA
+relatively to the consumptions with the adjusted sampling frequency.
+These energy values do not decrease even if the WiFi module fails to connect
+to an AP, not starting the MQTT client.
+
+
+### MQTT message latency
+
+I've measured the RTT of MQTT messages sent to `mqtt.eclipseprojects.io`
+using a number of "time-stamped" MQTT messages.
+The MQTT messages sent contain the value of `xTaskGetTickCount` got just before
+publishing the message. When the message is recieved another tick count is read
+and the difference is computed. The resulting value is the RTT of the message,
+which gives us also the time the message took to travel from the device to the
+MQTT broker. With this method I've measured a latency of about *250 mS*.

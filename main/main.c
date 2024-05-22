@@ -163,7 +163,7 @@ void app_main(void)
 
 	samples_buf_handle = xMessageBufferCreate((sizeof(size_t) + sizeof(int)) * ADC_SAMPLES_BUFFER_SIZE);
 	
-	wait_time_ticks = pdMS_TO_TICKS(0.8 * (1000 / sampling_freq)); // 80% of sampling period [ms]
+	wait_time_ticks = pdMS_TO_TICKS(1000 / sampling_freq);
 	
 	TaskHandle_t samplingTask_handle;
 	xTaskCreate(
